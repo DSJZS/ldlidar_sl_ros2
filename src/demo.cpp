@@ -45,6 +45,7 @@ int main(int argc, char **argv) {
   setting.enable_angle_crop_func = false;
   setting.angle_crop_min = 0.0;
   setting.angle_crop_max = 0.0;
+  setting.angle_offset = 0.0;
   int serial_baudrate = 0;
   ldlidar::LDType lidartypename = ldlidar::LDType::NO_VER;
 
@@ -59,6 +60,7 @@ int main(int argc, char **argv) {
   node->declare_parameter<bool>("enable_angle_crop_func", setting.enable_angle_crop_func);
   node->declare_parameter<double>("angle_crop_min", setting.angle_crop_min);
   node->declare_parameter<double>("angle_crop_max", setting.angle_crop_max);
+  node->declare_parameter<double>("angle_offset", setting.angle_crop_max);
 
   // get ros2 param
   node->get_parameter("product_name", product_name);
@@ -71,6 +73,7 @@ int main(int argc, char **argv) {
   node->get_parameter("enable_angle_crop_func", setting.enable_angle_crop_func);
   node->get_parameter("angle_crop_min", setting.angle_crop_min);
   node->get_parameter("angle_crop_max", setting.angle_crop_max);
+  node->get_parameter("angle_offset", setting.angle_offset);
 
   ldlidar::LDLidarDriver* lidar_drv = new ldlidar::LDLidarDriver();
 
@@ -85,6 +88,7 @@ int main(int argc, char **argv) {
   RCLCPP_INFO(node->get_logger(), "<enable_angle_crop_func>: %s", (setting.enable_angle_crop_func?"true":"false"));
   RCLCPP_INFO(node->get_logger(), "<angle_crop_min>: %f", setting.angle_crop_min);
   RCLCPP_INFO(node->get_logger(), "<angle_crop_max>: %f", setting.angle_crop_max);
+  RCLCPP_INFO(node->get_logger(), "<angle_offset>: %f", setting.angle_offset);
 
   if (port_name.empty()) {
     RCLCPP_ERROR(node->get_logger(), "fail, port_name is empty!");
@@ -219,7 +223,11 @@ void  ToLaserscanMessagePublish(ldlidar::Points2D& src,  double lidar_spin_freq,
     for (auto point : src) {
       float range = point.distance / 1000.f;  // distance unit transform to meters
       float intensity = point.intensity;      // laser receive intensity 
-      float dir_angle = point.angle;
+
+      /* Apply the corresponding offset angle to the direction angle, and ensure it is within the [0, 360) range */
+      float dir_angle = point.angle + setting.angle_offset;
+      while (dir_angle >= 360.0) dir_angle -= 360.0;
+      while (dir_angle < 0.0) dir_angle += 360.0;
 
       if ((point.distance == 0) && (point.intensity == 0)) { // filter is handled to  0, Nan will be assigned variable.
         range = std::numeric_limits<float>::quiet_NaN(); 
@@ -227,7 +235,15 @@ void  ToLaserscanMessagePublish(ldlidar::Points2D& src,  double lidar_spin_freq,
       }
 
       if (setting.enable_angle_crop_func) { // Angle crop setting, Mask data within the set angle range
-        if ((dir_angle >= setting.angle_crop_min) && (dir_angle <= setting.angle_crop_max)) {
+        /* Angle cropping also needs to apply the same offset angle as the direction angle */
+        float crop_min = setting.angle_crop_min + setting.angle_offset;
+        float crop_max = setting.angle_crop_max + setting.angle_offset;
+        /* Handle circular boundary for cropping */
+        while (crop_min >= 360.0) crop_min -= 360.0;
+        while (crop_min < 0.0) crop_min += 360.0;
+        while (crop_max >= 360.0) crop_max -= 360.0;
+        while (crop_max < 0.0) crop_max += 360.0;
+        if ((dir_angle >= crop_min) && (dir_angle <= crop_max)) {
           range = std::numeric_limits<float>::quiet_NaN();
           intensity = std::numeric_limits<float>::quiet_NaN();
         }
@@ -282,7 +298,7 @@ void  ToSensorPointCloudMessagePublish(ldlidar::Points2D& src, LaserScanSetting&
   static bool first_scan = true;
 
   ldlidar::Points2D dst = src;
-
+  
   start_scan_time = node->now();
   scan_time = (start_scan_time.seconds() - end_scan_time.seconds());
 
@@ -290,6 +306,14 @@ void  ToSensorPointCloudMessagePublish(ldlidar::Points2D& src, LaserScanSetting&
     first_scan = false;
     end_scan_time = start_scan_time;
     return;
+  }
+
+  for (auto& point : dst) {
+    point.angle += setting.angle_offset;
+
+    /* Ensure the angle is within the [0, 360) range */
+    while (point.angle >= 360.0) point.angle -= 360.0;
+    while (point.angle < 0.0) point.angle += 360.0;
   }
 
   if (setting.laser_scan_dir) {

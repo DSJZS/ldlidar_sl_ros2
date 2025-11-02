@@ -48,6 +48,10 @@ Parameter Description:
       {'angle_crop_min': 135.0}
       {'angle_crop_max': 225.0}
       which is [135.0, 225.0], angle unit is degress.
+- Angle offset setting, Apply a fixed clockwise offset to all angles:
+  - The angle offset is applied in clockwise direction, unit is degrees.
+    example:
+      {'angle_offset': 180.0}
 '''
 
 def generate_launch_description():
@@ -67,7 +71,8 @@ def generate_launch_description():
         {'laser_scan_dir': True},
         {'enable_angle_crop_func': False},
         {'angle_crop_min': 135.0},
-        {'angle_crop_max': 225.0}
+        {'angle_crop_max': 225.0},
+        {'angle_offset': 0.0}
       ]
   )
 
